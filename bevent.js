@@ -1,38 +1,40 @@
+  // Event dispatch system
 
-// forked from https://github.com/InsomniaNY/BackboneEvents
+  // usage
+  /*
+    Bevent.on('myevent', function(){
+      // code
+    });
+    Bevent.trigger('myevent');    
+    // or with payload
+    Bevent.on('myevent', function(data){
+      // code
+    });
+    Bevent.trigger('myevent', data);    
+  */
 
-/*
-  Extracted from Backbone.js 1.3.3
-  This allows the use of Backbone.Events without having to load the entirety of Backbone.
-  Reason: The Backbone.Events system is more versatile than jQuery Custom Events and this
-          provides a smaller footprint than loading the entire Backbone.js file or the
-          unnecessary functions listed below.
-  Functions Included: on, off, trigger
-  Functions NOT Included: listenTo, stopListening, once, listenToOnce
-*/
+  // originally extracted from Backbone.js 1.3.3 
+  // by github user InsomniaNY
+  // refactor and clean up to satisfy Webpack/React linting
+  // converted to node_module format
+  // by github user PrimeLens 
 
-// We create an empty function called Backbone so we can attach the Events to it as we would
-// if we were using Backbone.js in its entirety.
-var Backbone = function(){};
 
-/*
-  Everything below this point is direct from Backbone.js 1.3.3, including the comments
-*/
+  // for use clientside assign to window object after import
+  // import _ from 'bevent.js'; 
+  // window._ = _;
 
-  // Backbone.Events
-  // ---------------
+
+  import _ from 'lodash';
+
+
 
   // A module that can be mixed in to *any object* in order to provide it with
   // a custom event channel. You may bind a callback to an event with `on` or
   // remove with `off`; `trigger`-ing an event fires all callbacks in
   // succession.
-  //
-  //     var object = {};
-  //     _.extend(object, Backbone.Events);
-  //     object.on('expand', function(){ alert('expanded'); });
-  //     object.trigger('expand');
-  //
-  var Events = Backbone.Events = {};
+
+  var Bevent = {};
 
   // Regular expression used to split event strings.
   var eventSplitter = /\s+/;
@@ -60,10 +62,16 @@ var Backbone = function(){};
     return events;
   };
 
-  // Bind an event to a `callback` function. Passing `"all"` will bind
-  // the callback to all events fired.
-  Events.on = function(name, callback, context) {
-    return internalOn(this, name, callback, context);
+  // The reducing API that adds a callback to the `events` object.
+  var onApi = function(events, name, callback, options) {
+    if (callback) {
+      var handlers = events[name] || (events[name] = []);
+      var context = options.context, ctx = options.ctx, listening = options.listening;
+      if (listening) listening.count++;
+
+      handlers.push({callback: callback, context: context, ctx: context || ctx, listening: listening});
+    }
+    return events;
   };
 
   // Guard the `listening` argument from the public API.
@@ -80,31 +88,6 @@ var Backbone = function(){};
     }
 
     return obj;
-  };
-
-  // The reducing API that adds a callback to the `events` object.
-  var onApi = function(events, name, callback, options) {
-    if (callback) {
-      var handlers = events[name] || (events[name] = []);
-      var context = options.context, ctx = options.ctx, listening = options.listening;
-      if (listening) listening.count++;
-
-      handlers.push({callback: callback, context: context, ctx: context || ctx, listening: listening});
-    }
-    return events;
-  };
-
-  // Remove one or many callbacks. If `context` is null, removes all
-  // callbacks with that function. If `callback` is null, removes all
-  // callbacks for the event. If `name` is null, removes all bound
-  // callbacks for all events.
-  Events.off = function(name, callback, context) {
-    if (!this._events) return this;
-    this._events = eventsApi(offApi, this._events, name, callback, {
-      context: context,
-      listeners: this._listeners
-    });
-    return this;
   };
 
   // The reducing API that removes a callback from the `events` object.
@@ -138,9 +121,9 @@ var Backbone = function(){};
       for (var j = 0; j < handlers.length; j++) {
         var handler = handlers[j];
         if (
-          callback && callback !== handler.callback &&
-            callback !== handler.callback._callback ||
-              context && context !== handler.context
+          (callback && callback !== handler.callback &&
+            callback !== handler.callback._callback) ||
+              (context && context !== handler.context)
         ) {
           remaining.push(handler);
         } else {
@@ -162,19 +145,18 @@ var Backbone = function(){};
     return events;
   };
 
-  // Trigger one or many events, firing all bound callbacks. Callbacks are
-  // passed the same arguments as `trigger` is, apart from the event name
-  // (unless you're listening on `"all"`, which will cause your callback to
-  // receive the true name of the event as the first argument).
-  Events.trigger = function(name) {
-    if (!this._events) return this;
-
-    var length = Math.max(0, arguments.length - 1);
-    var args = Array(length);
-    for (var i = 0; i < length; i++) args[i] = arguments[i + 1];
-
-    eventsApi(triggerApi, this._events, name, void 0, args);
-    return this;
+  // A difficult-to-believe, but optimized internal dispatch function for
+  // triggering events. Tries to keep the usual cases speedy (most internal
+  // has 3 arguments).
+  var triggerEvents = function(events, args) {
+    var ev, i = -1, l = events.length, a1 = args[0], a2 = args[1], a3 = args[2];
+    switch (args.length) {
+      case 0: while (++i < l) (ev = events[i]).callback.call(ev.ctx); return;
+      case 1: while (++i < l) (ev = events[i]).callback.call(ev.ctx, a1); return;
+      case 2: while (++i < l) (ev = events[i]).callback.call(ev.ctx, a1, a2); return;
+      case 3: while (++i < l) (ev = events[i]).callback.call(ev.ctx, a1, a2, a3); return;
+      default: while (++i < l) (ev = events[i]).callback.apply(ev.ctx, args); return;
+    }
   };
 
   // Handles triggering the appropriate event callbacks.
@@ -189,17 +171,39 @@ var Backbone = function(){};
     return objEvents;
   };
 
-  // A difficult-to-believe, but optimized internal dispatch function for
-  // triggering events. Tries to keep the usual cases speedy (most internal
-  // Backbone events have 3 arguments).
-  var triggerEvents = function(events, args) {
-    var ev, i = -1, l = events.length, a1 = args[0], a2 = args[1], a3 = args[2];
-    switch (args.length) {
-      case 0: while (++i < l) (ev = events[i]).callback.call(ev.ctx); return;
-      case 1: while (++i < l) (ev = events[i]).callback.call(ev.ctx, a1); return;
-      case 2: while (++i < l) (ev = events[i]).callback.call(ev.ctx, a1, a2); return;
-      case 3: while (++i < l) (ev = events[i]).callback.call(ev.ctx, a1, a2, a3); return;
-      default: while (++i < l) (ev = events[i]).callback.apply(ev.ctx, args); return;
-    }
+  // Bind an event to a `callback` function. Passing `"all"` will bind
+  // the callback to all events fired.
+  Bevent.on = function(name, callback, context) {
+    return internalOn(this, name, callback, context);
   };
+
+  // Remove one or many callbacks. If `context` is null, removes all
+  // callbacks with that function. If `callback` is null, removes all
+  // callbacks for the event. If `name` is null, removes all bound
+  // callbacks for all events.
+  Bevent.off = function(name, callback, context) {
+    if (!this._events) return this;
+    this._events = eventsApi(offApi, this._events, name, callback, {
+      context: context,
+      listeners: this._listeners
+    });
+    return this;
+  };
+
+  // Trigger one or many events, firing all bound callbacks. Callbacks are
+  // passed the same arguments as `trigger` is, apart from the event name
+  // (unless you're listening on `"all"`, which will cause your callback to
+  // receive the true name of the event as the first argument).
+  Bevent.trigger = function(name) {
+    if (!this._events) return this;
+
+    var length = Math.max(0, arguments.length - 1);
+    var args = Array(length);
+    for (var i = 0; i < length; i++) args[i] = arguments[i + 1];
+
+    eventsApi(triggerApi, this._events, name, void 0, args);
+    return this;
+  };
+
+export default Bevent
 
